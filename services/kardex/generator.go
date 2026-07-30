@@ -589,11 +589,11 @@ func (g *Generator) generateSingleFile(insumos []KardexInsumo, filenameBase, fol
 	// ─── SECCIÓN RESUMEN ───
 	// 1. Portada
 	g.addCoverPage(pdf)
-	// 2. Totales globales (TOTAL GENERAL + RESUMEN INVENTARIO + ANALISIS DE COSTOS)
+	// 2. Tabla resumen por producto
+	g.addProductSummaryPage(pdf, insumos)
+	// 3. Totales globales (TOTAL GENERAL + RESUMEN INVENTARIO + ANALISIS DE COSTOS)
 	trk.Update(processKey, 13, "in-progress", "Generando totales globales...")
 	g.AddGlobalTotalsSection(pdf, globalTotals)
-	// 3. Tabla resumen por producto
-	g.addProductSummaryPage(pdf, insumos)
 
 	// ─── SECCIÓN SEGUIMIENTO ───
 	// Margin superior antes de las cabeceras
@@ -615,6 +615,10 @@ func (g *Generator) generateSingleFile(insumos []KardexInsumo, filenameBase, fol
 		g.addInsumoPage(pdf, &insumos[i], i+1, totalInsumos)
 		insumos[i].Kardex.Movimientos = nil
 	}
+
+	// Totales globales al FINAL del seguimiento (resumen ejecutivo final)
+	pdf.AddPage()
+	g.AddGlobalTotalsSection(pdf, globalTotals)
 
 	filename := filenameBase + ".pdf"
 	outputPath := filepath.Join(folder, filename)
@@ -683,6 +687,10 @@ func (g *Generator) generateBatchPDF(insumos []KardexInsumo, filenameBase, folde
 			shared.LogMemoryUsage(fmt.Sprintf("Batch %d/%d", i+1, len(batches)))
 		}
 	}
+
+	// Totales globales al FINAL del seguimiento (resumen ejecutivo final)
+	pdf.AddPage()
+	g.AddGlobalTotalsSection(pdf, globalTotals)
 
 	// Guardar
 	trk.Update(processKey, 95, "in-progress", "Guardando PDF...")
