@@ -5,3 +5,4 @@ test-output/
 
 *.log
 kardex-pdf-service
+.DS_Store
