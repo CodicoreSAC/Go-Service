@@ -60,6 +60,22 @@ type KardexMovimiento struct {
 	CostoFinal    *float64 `json:"costo_final,omitempty"`
 
 	IsFinal bool `json:"isFinal,omitempty"`
+
+	// Series/lotes del movimiento (el render Go aún no los dibuja; el Excel sí)
+	Series []KardexSerie `json:"series,omitempty"`
+	Lotes  []KardexLote  `json:"lotes,omitempty"`
+}
+
+// KardexSerie serie de producto asociada a un movimiento.
+type KardexSerie struct {
+	Code string `json:"code"`
+}
+
+// KardexLote lote asociado a un movimiento.
+type KardexLote struct {
+	Lote        string  `json:"lote"`
+	Vencimiento string  `json:"vencimiento"`
+	Cantidad    float64 `json:"cantidad"`
 }
 
 // KardexInitial representa el saldo inicial.
@@ -145,6 +161,9 @@ type KardexParams struct {
 	DateType      string `json:"dateType"`
 	Valores       string `json:"valores,omitempty"` // "e" | "d"
 	Idioma        string `json:"idioma,omitempty"`  // "es" | "en"
+	// Flags de inclusión (el render Go aún no los aplica; preparado para ello)
+	IsSerie  bool `json:"isSerie,omitempty"`
+	ConLotes bool `json:"conLotes,omitempty"`
 }
 
 // KardexJSONData estructura de los datos en el archivo JSON.
