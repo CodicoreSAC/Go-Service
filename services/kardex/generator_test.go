@@ -8,7 +8,7 @@ import (
 
 func TestCalculateMetrics(t *testing.T) {
 	cfg := config.Default()
-	gen := NewGenerator(Institution{RazonSocial: "Test", RUC: "12345678"}, "Periodo: Test", cfg, "L", "simple")
+	gen := NewGenerator(Institution{RazonSocial: "Test", RUC: "12345678"}, "Periodo: Test", cfg, "L", "simple", false)
 
 	insumos := []KardexInsumo{
 		{
@@ -40,7 +40,7 @@ func TestCalculateMetrics(t *testing.T) {
 
 func TestCalculateMetricsEmpty(t *testing.T) {
 	cfg := config.Default()
-	gen := NewGenerator(Institution{}, "", cfg, "L", "simple")
+	gen := NewGenerator(Institution{}, "", cfg, "L", "simple", false)
 
 	metrics := gen.CalculateMetrics([]KardexInsumo{})
 
@@ -56,7 +56,7 @@ func TestCreateOptimizedBatches(t *testing.T) {
 	cfg := config.Default()
 	cfg.ItemsPerBatch = 2 // 2 insumos por batch para test
 
-	gen := NewGenerator(Institution{}, "", cfg, "L", "")
+	gen := NewGenerator(Institution{}, "", cfg, "L", "", false)
 
 	insumos := []KardexInsumo{
 		{Kardex: KardexData{Movimientos: make([]KardexMovimiento, 10)}},
@@ -88,7 +88,7 @@ func TestCreateOptimizedBatchesMovementLimit(t *testing.T) {
 	cfg.ItemsPerBatch = 100
 	cfg.MaxMovementsPerBatch = 50
 
-	gen := NewGenerator(Institution{}, "", cfg, "L", "")
+	gen := NewGenerator(Institution{}, "", cfg, "L", "", false)
 
 	insumos := []KardexInsumo{
 		{Kardex: KardexData{Movimientos: make([]KardexMovimiento, 30)}},
@@ -109,7 +109,7 @@ func TestCreateOptimizedBatchesMovementLimit(t *testing.T) {
 
 func TestTotalPagesInitiallyZero(t *testing.T) {
 	cfg := config.Default()
-	gen := NewGenerator(Institution{}, "", cfg, "L", "")
+	gen := NewGenerator(Institution{}, "", cfg, "L", "", false)
 
 	if gen.TotalPages() != 0 {
 		t.Errorf("TotalPages() = %d, want 0 initially", gen.TotalPages())

@@ -162,8 +162,9 @@ type KardexParams struct {
 	DateType      string `json:"dateType"`
 	Valores       string `json:"valores,omitempty"` // "e" | "d"
 	Idioma        string `json:"idioma,omitempty"`  // "es" | "en"
-	// Flags de inclusión (el render Go aún no los aplica; preparado para ello)
-	IsSerie  bool `json:"isSerie,omitempty"`
+	// Flags de inclusión
+	IsSerie       bool `json:"isSerie,omitempty"`
+	DetalleSeries bool `json:"detalleSeries,omitempty"` // Modo Detallado: una fila por serie
 	ConLotes bool `json:"conLotes,omitempty"`
 }
 

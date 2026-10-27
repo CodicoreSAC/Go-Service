@@ -390,6 +390,118 @@ func (g *Generator) buildKardexTable(pdf *gofpdf.Fpdf, title string, movements [
 			vencCol = shared.ToLatin(shortDate(m.Lotes[0].Vencimiento))
 		}
 
+		// Modo Detallado: una fila por serie del movimiento (cantidad 1.00, código en Tipo Op)
+		if g.detalleSeries && len(m.Series) > 0 {
+			for si, sr := range m.Series {
+				if pdf.GetY()+rh > maxY {
+					g.addContinuationHeader(pdf, title)
+				}
+
+				if isSalida {
+					g.style.ApplySalida(pdf, idx+si)
+				} else {
+					g.style.ApplyData(pdf, idx+si)
+				}
+				if estadoLbl != "" {
+					pdf.SetFillColor(255, 231, 230)
+					pdf.SetTextColor(185, 28, 28)
+				}
+
+				opSerie := tipoOp
+			if !showSerie {
+				opSerie += " · " + shared.ToLatin(sr.Code)
+			}
+				ent1, entPu, entTot, sal1, salPu, salTot := "", "", "", "", "", ""
+				if !isSalida {
+					ent1, entPu, entTot = "1.00", entPrecio, entPrecio
+				}
+				if isSalida {
+					sal1, salPu, salTot = "1.00", salPrecio, salPrecio
+				}
+
+				g.renderKardexDataRowContent(pdf, colWidths,
+					fmt.Sprintf("%d", idx+1),
+					shared.ToLatin(m.FechaKardex),
+					shared.ToLatin(m.TipoDocumento),
+					shared.ToLatin(m.SerieDocumento),
+					shared.ToLatin(m.NumeroDocumento),
+					shared.ToLatin(opSerie),
+					false,
+					ent1, entPu, entTot,
+					sal1, salPu, salTot,
+					shared.FormatNumber(shared.GetFloatValue(m.CantidadFinal)),
+					shared.FormatNumber(shared.GetFloatValue(m.PrecioFinal)),
+					shared.FormatNumber(shared.GetFloatValue(m.CostoFinal)),
+				showSerie, showLotes, showEstado, shared.ToLatin(sr.Code), "", "", estadoCol,
+				)
+				if estadoLbl != "" {
+					pdf.SetTextColor(0, 0, 0)
+				}
+			}
+			continue
+		}
+
+		// Modo Detallado: una fila por lote del movimiento (cantidad = la del lote)
+		if g.detalleSeries && len(m.Lotes) > 0 {
+			for li, lt := range m.Lotes {
+				if pdf.GetY()+rh > maxY {
+					g.addContinuationHeader(pdf, title)
+				}
+
+				if isSalida {
+					g.style.ApplySalida(pdf, idx+li)
+				} else {
+					g.style.ApplyData(pdf, idx+li)
+				}
+				if estadoLbl != "" {
+					pdf.SetFillColor(255, 231, 230)
+					pdf.SetTextColor(185, 28, 28)
+				}
+
+				opLote := tipoOp
+				if !showLotes {
+					opLote += " · " + shared.ToLatin(lt.Lote)
+				}
+				cantFila := lt.Cantidad
+				if cantFila == 0 {
+					cantFila = m.CantidadDetalle
+				}
+				totalFila := cantFila * m.PrecioDetalle
+
+				ent1, entPu, entTot, sal1, salPu, salTot := "", "", "", "", "", ""
+				if !isSalida {
+					ent1 = shared.FormatNumber(cantFila)
+					entPu = shared.FormatNumber(m.PrecioDetalle)
+					entTot = shared.FormatNumber(totalFila)
+				}
+				if isSalida {
+					sal1 = shared.FormatNumber(cantFila)
+					salPu = shared.FormatNumber(m.PrecioDetalle)
+					salTot = shared.FormatNumber(totalFila)
+				}
+
+				g.renderKardexDataRowContent(pdf, colWidths,
+					fmt.Sprintf("%d", idx+1),
+					shared.ToLatin(m.FechaKardex),
+					shared.ToLatin(m.TipoDocumento),
+					shared.ToLatin(m.SerieDocumento),
+					shared.ToLatin(m.NumeroDocumento),
+					shared.ToLatin(opLote),
+					false,
+					ent1, entPu, entTot,
+					sal1, salPu, salTot,
+					shared.FormatNumber(shared.GetFloatValue(m.CantidadFinal)),
+					shared.FormatNumber(shared.GetFloatValue(m.PrecioFinal)),
+					shared.FormatNumber(shared.GetFloatValue(m.CostoFinal)),
+				showSerie, showLotes, showEstado, "", shared.ToLatin(lt.Lote), shared.ToLatin(shortDate(lt.Vencimiento)), estadoCol,
+				)
+				if estadoLbl != "" {
+					pdf.SetTextColor(0, 0, 0)
+				}
+			}
+			continue
+		}
+
 		// Aplicar estilo según tipo de fila (salida vs entrada, con zebra)
 		if isSalida {
 			g.style.ApplySalida(pdf, idx)

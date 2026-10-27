@@ -23,17 +23,19 @@ type Generator struct {
 	totalMovements int
 	startTime    time.Time
 	cfg          *config.AppConfig
-	orientation  string      // "L" (landscape) o "P" (portrait)
-	style        TableStyle  // estilo visual de las tablas
+	orientation   string      // "L" (landscape) o "P" (portrait)
+	style         TableStyle  // estilo visual de las tablas
+	detalleSeries bool        // Modo Detallado: una fila por serie
 }
 
 // NewGenerator crea un nuevo generador.
-func NewGenerator(institution Institution, periodo string, cfg *config.AppConfig, orientation string, styleName string) *Generator {
+func NewGenerator(institution Institution, periodo string, cfg *config.AppConfig, orientation string, styleName string, detalleSeries bool) *Generator {
 	if orientation == "" {
 		orientation = "L" // default: landscape
 	}
 	return &Generator{
-		institution:  institution,
+		institution:   institution,
+		detalleSeries: detalleSeries,
 		totalPages:   0,
 		timestamp:    time.Now().Format("02/01/2006 15:04:05"),
 		periodo:      periodo,
@@ -284,6 +286,7 @@ func GenerateAll(
 	cfg *config.AppConfig,
 	userOrientation string,
 	userStyle string,
+	detalleSeries bool,
 ) []GenerateAllResult {
 	if err := os.MkdirAll(outputFolder, 0755); err != nil {
 		return []GenerateAllResult{
@@ -320,7 +323,7 @@ func GenerateAll(
 		if userOrientation == "P" {
 			orientation = "P"
 		}
-		gen := NewGenerator(institution, periodo, cfg, orientation, spec.Style)
+		gen := NewGenerator(institution, periodo, cfg, orientation, spec.Style, detalleSeries)
 		gen.totalMovements = 0 // reset
 
 		filenameSuffix := filenameBase + spec.Suffix
