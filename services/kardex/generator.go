@@ -599,10 +599,11 @@ func (g *Generator) generateSingleFile(insumos []KardexInsumo, filenameBase, fol
 	// Margin superior antes de las cabeceras
 	pdf.Ln(4)
 	// Cabecera de columnas UNA VEZ al inicio de la sección
-	seguimientoColWidths := g.kardexColWidths(pdf)
-	g.renderKardexHeaderRow1(pdf, seguimientoColWidths)
+	showSerie, showLotes, showEstado := kardexSectionFlags(insumos)
+	seguimientoColWidths := g.kardexColWidths(pdf, showSerie, showLotes, showEstado)
+	g.renderKardexHeaderRow1(pdf, seguimientoColWidths, showSerie, showLotes, showEstado)
 	pdf.Ln(-1)
-	g.renderKardexHeaderRow2(pdf, seguimientoColWidths)
+	g.renderKardexHeaderRow2(pdf, seguimientoColWidths, showSerie, showLotes, showEstado)
 	pdf.Ln(-1)
 
 	// Movimientos por producto + totales por producto (dentro de cada producto)
@@ -612,7 +613,7 @@ func (g *Generator) generateSingleFile(insumos []KardexInsumo, filenameBase, fol
 		trk.Update(processKey, progress, "in-progress",
 			fmt.Sprintf("Procesando insumo %d/%d", i+1, totalInsumos))
 
-		g.addInsumoPage(pdf, &insumos[i], i+1, totalInsumos)
+		g.addInsumoPage(pdf, &insumos[i], i+1, totalInsumos, showSerie, showLotes, showEstado)
 		insumos[i].Kardex.Movimientos = nil
 	}
 
@@ -657,10 +658,11 @@ func (g *Generator) generateBatchPDF(insumos []KardexInsumo, filenameBase, folde
 
 	// Cabecera de columnas UNA VEZ al inicio de la sección de seguimiento
 	pdf.Ln(4)
-	seguimientoColWidths := g.kardexColWidths(pdf)
-	g.renderKardexHeaderRow1(pdf, seguimientoColWidths)
+	showSerie, showLotes, showEstado := kardexSectionFlags(insumos)
+	seguimientoColWidths := g.kardexColWidths(pdf, showSerie, showLotes, showEstado)
+	g.renderKardexHeaderRow1(pdf, seguimientoColWidths, showSerie, showLotes, showEstado)
 	pdf.Ln(-1)
-	g.renderKardexHeaderRow2(pdf, seguimientoColWidths)
+	g.renderKardexHeaderRow2(pdf, seguimientoColWidths, showSerie, showLotes, showEstado)
 	pdf.Ln(-1)
 
 	// Procesar insumos en batches
@@ -674,7 +676,7 @@ func (g *Generator) generateBatchPDF(insumos []KardexInsumo, filenameBase, folde
 			fmt.Sprintf("Procesando batch %d/%d", i+1, len(batches)))
 
 		for j := range batch {
-			g.addInsumoPage(pdf, &batch[j], startIndex+j+1, totalInsumos)
+			g.addInsumoPage(pdf, &batch[j], startIndex+j+1, totalInsumos, showSerie, showLotes, showEstado)
 		}
 
 		for j := range batch {
@@ -857,8 +859,9 @@ func (g *Generator) generateSummaryPDF(insumos []KardexInsumo, outputPath string
 func (g *Generator) generateBatchOnlyPDF(batch []KardexInsumo, startIndex, totalInsumos int, outputPath string) error {
 	pdf := g.createNewPDF()
 
+	showSerie, showLotes, showEstado := kardexSectionFlags(batch)
 	for i := range batch {
-		g.addInsumoPage(pdf, &batch[i], startIndex+i+1, totalInsumos)
+		g.addInsumoPage(pdf, &batch[i], startIndex+i+1, totalInsumos, showSerie, showLotes, showEstado)
 	}
 
 	file, err := os.Create(outputPath)

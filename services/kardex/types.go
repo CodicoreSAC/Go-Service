@@ -34,6 +34,7 @@ type KardexMovimiento struct {
 	FechaKardex     string                `json:"fecha_kardex"`
 	HoraKardex      string                `json:"hora_kardex"`
 	EstadoKardex    string                `json:"estado_kardex"` // "0" | "1"
+	EstadoDocumento string                `json:"estado_documento"` // "" | "00".."06" (04 rechazado / 03 observado / 05 anulado)
 	IDDetalle       int                   `json:"iddetalle"`
 	CantidadDetalle float64               `json:"cantidad_detalle"`
 	PrecioDetalle   float64               `json:"precio_detalle"`
