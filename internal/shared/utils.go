@@ -56,6 +56,9 @@ func FormatNumber(value float64) string {
 
 // FormatPeriodo formatea el periodo según el tipo.
 func FormatPeriodo(dateType, dateStart string) string {
+	if dateType == "todos" {
+		return "Histórico completo"
+	}
 	if dateType == "" || dateStart == "" {
 		return "Periodo no especificado"
 	}
