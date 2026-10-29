@@ -152,6 +152,7 @@ type GeneratePDFRequest struct {
 	ReportType      string `json:"reportType,omitempty"`    // "completo" | "resumen_saldos"
 	Orientation     string `json:"orientation,omitempty"`   // "L" (landscape, default) | "P" (portrait)
 	TableStyle      string `json:"tableStyle,omitempty"`    // "simple" | "formal" | "contador"
+	ReportTypes     []string `json:"reportTypes,omitempty"` // filtro para /generate-all: subconjunto de reportes
 }
 
 // KardexParams parámetros adicionales del kardex.
@@ -164,7 +165,7 @@ type KardexParams struct {
 	Idioma        string `json:"idioma,omitempty"`  // "es" | "en"
 	// Flags de inclusión
 	IsSerie       bool `json:"isSerie,omitempty"`
-	DetalleSeries bool `json:"detalleSeries,omitempty"` // Modo Detallado: una fila por serie
+	Detalle bool `json:"detalle,omitempty"` // Modo Detallado: una fila por serie/lote + columnas SERIES/LOTE
 	ConLotes bool `json:"conLotes,omitempty"`
 }
 

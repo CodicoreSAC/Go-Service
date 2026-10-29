@@ -391,7 +391,7 @@ func (g *Generator) buildKardexTable(pdf *gofpdf.Fpdf, title string, movements [
 		}
 
 		// Modo Detallado: una fila por serie del movimiento (cantidad 1.00, código en Tipo Op)
-		if g.detalleSeries && len(m.Series) > 0 {
+		if g.detallado && len(m.Series) > 0 {
 			for si, sr := range m.Series {
 				if pdf.GetY()+rh > maxY {
 					g.addContinuationHeader(pdf, title)
@@ -442,7 +442,7 @@ func (g *Generator) buildKardexTable(pdf *gofpdf.Fpdf, title string, movements [
 		}
 
 		// Modo Detallado: una fila por lote del movimiento (cantidad = la del lote)
-		if g.detalleSeries && len(m.Lotes) > 0 {
+		if g.detallado && len(m.Lotes) > 0 {
 			for li, lt := range m.Lotes {
 				if pdf.GetY()+rh > maxY {
 					g.addContinuationHeader(pdf, title)
@@ -536,8 +536,8 @@ func (g *Generator) buildKardexTable(pdf *gofpdf.Fpdf, title string, movements [
 			pdf.SetTextColor(0, 0, 0)
 		}
 
-		// Sub-línea de series del movimiento: label en negrita + códigos (compacta)
-		if len(m.Series) > 0 {
+		// Sub-línea de series del movimiento — SOLO en modo Detallado
+		if g.detallado && len(m.Series) > 0 {
 			codes := make([]string, 0, len(m.Series))
 			for _, sr := range m.Series {
 				codes = append(codes, shared.ToLatin(sr.Code))
@@ -568,8 +568,8 @@ func (g *Generator) buildKardexTable(pdf *gofpdf.Fpdf, title string, movements [
 			pdf.SetFont("Arial", "", 5.5)
 		}
 
-		// Sub-línea de lotes del movimiento: lote (vence X) x cant
-		if len(m.Lotes) > 0 {
+		// Sub-línea de lotes del movimiento — SOLO en modo Detallado
+		if g.detallado && len(m.Lotes) > 0 {
 			parts := make([]string, 0, len(m.Lotes))
 			for _, lt := range m.Lotes {
 				pp := shared.ToLatin(lt.Lote)

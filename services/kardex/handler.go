@@ -81,7 +81,7 @@ func generatePDFHandler(cfg *config.AppConfig, trk *tracker.ProcessTracker) gin.
 		periodo := shared.FormatPeriodo(kardexData.Params.DateType, kardexData.Params.DateStart)
 
 		// Crear generador
-		gen := NewGenerator(kardexData.Institution, periodo, cfg, req.Orientation, req.TableStyle, kardexData.Params.DetalleSeries)
+		gen := NewGenerator(kardexData.Institution, periodo, cfg, req.Orientation, req.TableStyle, kardexData.Params.Detalle)
 
 		// Calcular métricas
 		metrics := gen.CalculateMetrics(kardexData.Insumos)
@@ -212,7 +212,7 @@ func generateAllHandler(cfg *config.AppConfig, trk *tracker.ProcessTracker) gin.
 		}
 
 		// Generar los 3 formatos
-		results := GenerateAll(kardexData.Insumos, kardexData.Institution, periodo, filenameBase, req.OutputDirectory, processKey, trk, cfg, req.Orientation, req.TableStyle, kardexData.Params.DetalleSeries)
+		results := GenerateAll(kardexData.Insumos, kardexData.Institution, periodo, filenameBase, req.OutputDirectory, processKey, trk, cfg, req.Orientation, req.TableStyle, kardexData.Params.Detalle, req.ReportTypes)
 
 		for _, r := range results {
 			if r.Filename != "" {
@@ -220,7 +220,7 @@ func generateAllHandler(cfg *config.AppConfig, trk *tracker.ProcessTracker) gin.
 			}
 		}
 
-		metrics := NewGenerator(kardexData.Institution, periodo, cfg, "L", req.TableStyle, kardexData.Params.DetalleSeries).CalculateMetrics(kardexData.Insumos)
+		metrics := NewGenerator(kardexData.Institution, periodo, cfg, "L", req.TableStyle, kardexData.Params.Detalle).CalculateMetrics(kardexData.Insumos)
 
 		// Liberar memoria
 		kardexData.Insumos = nil

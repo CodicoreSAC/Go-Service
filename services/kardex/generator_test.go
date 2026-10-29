@@ -1,8 +1,10 @@
 package kardex
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/jung-kurt/gofpdf"
 	"kardex-pdf-service/internal/config"
 )
 
@@ -117,3 +119,67 @@ func TestTotalPagesInitiallyZero(t *testing.T) {
 }
 
 // generateSingleFile necesita filesystem — ese es test de integración (test-go-service.sh)
+// El filtro de reportTypes de generate-all: subconjunto, todos y nil
+func TestFiltrarFormatsPorReportTypes(t *testing.T) {
+	if got := filtrarFormatsPorReportTypes(defaultFormats, []string{"sunat_13_1"}); len(got) != 1 || got[0].ReportType != "sunat_13_1" {
+		t.Fatalf("solo sunat_13_1: got %v", got)
+	}
+	if got := filtrarFormatsPorReportTypes(defaultFormats, []string{"completo", "sunat_13_1"}); len(got) != 2 {
+		t.Fatalf("completo + sunat_13_1: got %d formatos", len(got))
+	}
+	if got := filtrarFormatsPorReportTypes(defaultFormats, nil); len(got) != len(defaultFormats) {
+		t.Fatalf("nil = todos: got %d", len(got))
+	}
+	if got := filtrarFormatsPorReportTypes(defaultFormats, []string{"inexistente"}); len(got) != 0 {
+		t.Fatalf("inexistente = vacío: got %d", len(got))
+	}
+}
+
+// fitCellText: no trunca si cabe; trunca con '...' y cabe en el ancho si no
+func TestFitCellText(t *testing.T) {
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetFont("Arial", "", 7)
+
+	corto := "ABC"
+	if got := fitCellText(pdf, corto, 50); got != corto {
+		t.Fatalf("cabe → sin truncar, got %q", got)
+	}
+
+	largo := strings.Repeat("X", 200)
+	got := fitCellText(pdf, largo, 50)
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("debe terminar en '...', got %q", got[len(got)-10:])
+	}
+	if w := pdf.GetStringWidth(got); w > 50 {
+		t.Fatalf("truncado debe caber: %.2fmm > 50mm", w)
+	}
+}
+
+func TestFormatFechaSunat(t *testing.T) {
+	if got := formatFechaSunat("2026-03-07"); got != "07/03/2026" {
+		t.Fatalf("got %q", got)
+	}
+	if got := formatFechaSunat("julio"); got != "julio" {
+		t.Fatalf("passthrough: got %q", got)
+	}
+}
+
+// Tabla 12 SUNAT: códigos de tipo de operación del 13.1
+func TestTablaOperacionSunatCode(t *testing.T) {
+	casos := map[string]string{
+		"venta":        "01",
+		"compra":       "02",
+		"traslado":     "11",
+		"nota":         "99",
+		"devolucion":   "06",
+		"desconocido":  "99",
+	}
+	for tipo, want := range casos {
+		if got := tablaOperacionSunatCode(tipo); got != want {
+			t.Errorf("%s → got %s, want %s", tipo, got, want)
+		}
+	}
+}
+
+// config referenciada por los tests existentes
+var _ = config.Default()

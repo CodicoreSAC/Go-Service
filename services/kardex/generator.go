@@ -1,6 +1,8 @@
 package kardex
 
 import (
+	"strings"
+
 	"fmt"
 	"log"
 	"os"
@@ -25,17 +27,17 @@ type Generator struct {
 	cfg          *config.AppConfig
 	orientation   string      // "L" (landscape) o "P" (portrait)
 	style         TableStyle  // estilo visual de las tablas
-	detalleSeries bool        // Modo Detallado: una fila por serie
+	detallado bool        // Modo Detallado: una fila por serie/lote + columnas extras
 }
 
 // NewGenerator crea un nuevo generador.
-func NewGenerator(institution Institution, periodo string, cfg *config.AppConfig, orientation string, styleName string, detalleSeries bool) *Generator {
+func NewGenerator(institution Institution, periodo string, cfg *config.AppConfig, orientation string, styleName string, detallado bool) *Generator {
 	if orientation == "" {
 		orientation = "L" // default: landscape
 	}
 	return &Generator{
 		institution:   institution,
-		detalleSeries: detalleSeries,
+		detallado: detallado,
 		totalPages:   0,
 		timestamp:    time.Now().Format("02/01/2006 15:04:05"),
 		periodo:      periodo,
@@ -175,45 +177,78 @@ func (g *Generator) GenerateSUNAT13(insumos []KardexInsumo, filenameBase, output
 
 	trk.Update(processKey, 5, "in-progress", "Generando Formato 13.1 SUNAT...")
 
+	// Periodo REAL: con histórico completo, el rango min–max de fechas de los movimientos
+	// (SUNAT exige un periodo verificable — "Histórico completo" no es un periodo válido)
+	periodoTxt := g.periodo
+	if g.periodo == "Histórico completo" {
+		minF, maxF := "", ""
+		for i := range insumos {
+			for _, m := range insumos[i].Kardex.Movimientos {
+				if m.Asunto == "proforma" {
+					continue
+				}
+				if minF == "" || m.FechaKardex < minF {
+					minF = m.FechaKardex
+				}
+				if maxF == "" || m.FechaKardex > maxF {
+					maxF = m.FechaKardex
+				}
+			}
+		}
+		if minF != "" {
+			periodoTxt = formatFechaSunat(minF) + " - " + formatFechaSunat(maxF)
+		}
+	}
+
 	pdf := g.createNewPDF()
 
-	// Header específico SUNAT 13.1
+	// Colores neutros: el bloque contribuyente NO hereda relleno/texto del estilo
+	// del record (formal/contador setean fill oscuro + texto blanco → barra negra)
+	pdf.SetFillColor(255, 255, 255)
+	pdf.SetTextColor(0, 0, 0)
+	pdf.SetDrawColor(0, 0, 0)
+
+	// Header específico SUNAT 13.1 — texto SIEMPRE negro (las filas de la tabla
+	// cambian el color de texto y el header corre en TODAS las páginas)
 	pdf.SetHeaderFunc(func() {
+		pdf.SetTextColor(0, 0, 0)
 		pdf.SetY(3)
 		pdf.SetFont("Arial", "B", 8)
 		pdf.CellFormat(0, 4, "FORMATO 13.1 - REGISTRO DEL INVENTARIO PERMANENTE VALORIZADO", "", 1, "C", false, 0, "")
 		pdf.SetFont("Arial", "", 6.5)
-		pdf.CellFormat(0, 3.5, "Periodo: "+shared.ToLatin(g.periodo)+" | RUC: "+g.institution.RUC+" | "+shared.ToLatin(g.institution.RazonSocial), "", 1, "C", false, 0, "")
+		pdf.CellFormat(0, 3.5, "Periodo: "+shared.ToLatin(periodoTxt)+" | RUC: "+g.institution.RUC+" | "+shared.ToLatin(g.institution.RazonSocial), "", 1, "C", false, 0, "")
 		pdf.Ln(1.5)
 	})
 
 	pdf.AddPage()
 
-	// Datos del contribuyente (SUNAT exige esto al inicio)
-	pdf.SetFont("Arial", "B", 8)
+	// Datos del contribuyente (SUNAT exige esto al inicio) — fuente REGULAR
+	// (el diseño oficial no usa negrita), valores truncados al ancho de su celda
+	pdf.SetFont("Arial", "", 8)
 	pdf.CellFormat(0, 5, "IDENTIFICACION DEL CONTRIBUYENTE", "", 1, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 7)
 
-	leftMargin, _, _, _ := pdf.GetMargins()
-	labelW := 40.0
-	valueW := 80.0
-	_, pageWidth := pdf.GetPageSize()
-	rightValueW := pageWidth - leftMargin*2 - labelW*2 - valueW
+	leftMargin, _, rightMargin, _ := pdf.GetMargins()
+	labelW := 28.0
+	valueW := 60.0
+	pageWidth, _ := pdf.GetPageSize() // (ancho, alto) — el ANCHO es el PRIMERO
+	rightValueW := pageWidth - leftMargin - rightMargin - (labelW * 2) - valueW
+
+	rucTxt := fitCellText(pdf, shared.ToLatin(g.institution.RUC), valueW-3)
+	razonTxt := fitCellText(pdf, shared.ToLatin(g.institution.RazonSocial), rightValueW-3)
+	periodoVal := fitCellText(pdf, shared.ToLatin(periodoTxt), valueW-3)
+	direccionTxt := fitCellText(pdf, shared.ToLatin(g.institution.Address), rightValueW-3)
 
 	pdf.CellFormat(labelW, 4, "RUC:", "1", 0, "R", true, 0, "")
-	pdf.CellFormat(valueW, 4, " "+g.institution.RUC, "1", 0, "L", false, 0, "")
+	pdf.CellFormat(valueW, 4, " "+rucTxt, "1", 0, "L", false, 0, "")
 	pdf.CellFormat(labelW, 4, "Razon Social:", "1", 0, "R", true, 0, "")
-	pdf.CellFormat(rightValueW, 4, " "+shared.ToLatin(g.institution.RazonSocial), "1", 0, "L", false, 0, "")
+	pdf.CellFormat(rightValueW, 4, " "+razonTxt, "1", 0, "L", false, 0, "")
 	pdf.Ln(-1)
 
 	pdf.CellFormat(labelW, 4, "Periodo:", "1", 0, "R", true, 0, "")
-	pdf.CellFormat(valueW, 4, " "+shared.ToLatin(g.periodo), "1", 0, "L", false, 0, "")
+	pdf.CellFormat(valueW, 4, " "+periodoVal, "1", 0, "L", false, 0, "")
 	pdf.CellFormat(labelW, 4, "Establecimiento:", "1", 0, "R", true, 0, "")
-	pdf.CellFormat(rightValueW, 4, " "+shared.ToLatin(g.institution.Address), "1", 0, "L", false, 0, "")
-	pdf.Ln(-1)
-
-	pdf.CellFormat(labelW, 4, "Codigo:", "1", 0, "R", true, 0, "")
-	pdf.CellFormat(valueW+labelW+rightValueW, 4, " "+shared.ToLatin(g.periodo), "1", 0, "L", false, 0, "")
+	pdf.CellFormat(rightValueW, 4, " "+direccionTxt, "1", 0, "L", false, 0, "")
 	pdf.Ln(-1)
 
 	pdf.Ln(5)
@@ -266,6 +301,24 @@ type FormatSpec struct {
 	Style       string // "simple" | "formal" | "contador"
 }
 
+// filtrarFormatsPorReportTypes deja solo los FormatSpec cuyo ReportType esté en la
+// lista (lista vacía o nil = todos). Usada por generate-all para el array del request.
+func filtrarFormatsPorReportTypes(formats []FormatSpec, only []string) []FormatSpec {
+	if len(only) == 0 {
+		return formats
+	}
+	filtered := make([]FormatSpec, 0, len(formats))
+	for _, f := range formats {
+		for _, rt := range only {
+			if f.ReportType == rt {
+				filtered = append(filtered, f)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
 // defaultFormats son los 3 formatos que se generan por defecto.
 var defaultFormats = []FormatSpec{
 	{ReportType: "completo", Suffix: "-completo", Orientation: "L"},
@@ -286,7 +339,8 @@ func GenerateAll(
 	cfg *config.AppConfig,
 	userOrientation string,
 	userStyle string,
-	detalleSeries bool,
+	detallado bool,
+	onlyReportTypes []string,
 ) []GenerateAllResult {
 	if err := os.MkdirAll(outputFolder, 0755); err != nil {
 		return []GenerateAllResult{
@@ -294,9 +348,8 @@ func GenerateAll(
 		}
 	}
 
-	// Inyectar el style del usuario en todos los formatos
-	formats := make([]FormatSpec, len(defaultFormats))
-	copy(formats, defaultFormats)
+	// Inyectar el style del usuario + filtro opcional de reportes (generate-all)
+	formats := filtrarFormatsPorReportTypes(defaultFormats, onlyReportTypes)
 	for i := range formats {
 		if userStyle != "" {
 			formats[i].Style = userStyle
@@ -323,7 +376,7 @@ func GenerateAll(
 		if userOrientation == "P" {
 			orientation = "P"
 		}
-		gen := NewGenerator(institution, periodo, cfg, orientation, spec.Style, detalleSeries)
+		gen := NewGenerator(institution, periodo, cfg, orientation, spec.Style, detallado)
 		gen.totalMovements = 0 // reset
 
 		filenameSuffix := filenameBase + spec.Suffix
@@ -380,10 +433,52 @@ func GenerateAll(
 	return results
 }
 
+// tablaOperacionSunat mapea el tipo_operacion interno a los códigos de la
+// Tabla 12 SUNAT (Códigos de tipo de operación) que exige el Formato 13.1.
+var tablaOperacionSunat = map[string]string{
+	"venta":      "01",
+	"compra":     "02",
+	"traslado":   "11", // Transferencia entre almacenes
+	"nota":       "99",
+	"devolucion": "06",
+}
+
+func tablaOperacionSunatCode(tipoOperacion string) string {
+	if c, ok := tablaOperacionSunat[tipoOperacion]; ok {
+		return c
+	}
+	return "99" // Otros (especificar)
+}
+
+// formatFechaSunat convierte 'YYYY-MM-DD' a 'DD/MM/YYYY' (diseño oficial 13.1)
+func formatFechaSunat(fecha string) string {
+	if len(fecha) == 10 && fecha[4] == '-' && fecha[7] == '-' {
+		return fecha[8:10] + "/" + fecha[5:7] + "/" + fecha[0:4]
+	}
+	return fecha
+}
+
+// fitCellText trunca el texto con '...' para que quepa en el ancho indicado
+// (mide con la fuente y tamaño vigentes). Evita desbordes del render.
+func fitCellText(pdf *gofpdf.Fpdf, texto string, ancho float64) string {
+	if texto == "" || pdf.GetStringWidth(texto) <= ancho {
+		return texto
+	}
+	for len(texto) > 1 && pdf.GetStringWidth(texto+"...") > ancho {
+		runes := []rune(texto)
+		texto = string(runes[:len(runes)-1])
+		texto = strings.TrimRight(texto, " ")
+	}
+	return texto + "..."
+}
+
 // addSUNAT13InsumoTable agrega la tabla de detalle de un producto en formato 13.1.
+// Columnas oficiales (16): Fecha | Comprobante (Tipo/Serie/Numero) | T.Oper (Tabla 12)
+// | Código | U.M. | Entradas×3 | Salidas×3 | Saldo Final×3
 func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo, index, total int) {
 	denomination := "Sin denominacion"
 	barcode := "S/C"
+	unitLabel := ""
 	if insumo.InsumoDetail.Insumo != nil {
 		if insumo.InsumoDetail.Insumo.Denomination != "" {
 			denomination = shared.ToLatin(insumo.InsumoDetail.Insumo.Denomination)
@@ -391,39 +486,54 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 		if insumo.InsumoDetail.Insumo.Barcode != "" {
 			barcode = shared.ToLatin(insumo.InsumoDetail.Insumo.Barcode)
 		}
+		if insumo.InsumoDetail.Insumo.UnidadMedida != "" {
+			unitLabel = shared.ToLatin(insumo.InsumoDetail.Insumo.UnidadMedida)
+		} else if insumo.InsumoDetail.Insumo.UnitSimbol != "" {
+			unitLabel = shared.ToLatin(insumo.InsumoDetail.Insumo.UnitSimbol)
+		}
 	}
 
-	// Título del producto
-	pdf.SetFont("Arial", "B", 7)
-	pdf.CellFormat(0, 5, fmt.Sprintf("Producto %d/%d: %s (%s)", index, total, denomination, barcode), "", 1, "L", false, 0, "")
+	// Código del elemento: barcode del insumo o el código del primer movimiento
+	elementCode := barcode
+	if (elementCode == "" || elementCode == "S/C") && len(insumo.Kardex.Movimientos) > 0 {
+		elementCode = shared.ToLatin(insumo.Kardex.Movimientos[0].CodigoInsumo)
+	}
 
-	// Columnas SUNAT 13.1: 12 columnas (más compactas que el completo)
-	// Fecha | Tipo Doc | Serie | Numero | Entradas(Cant,P.Unit,Total) | Salidas(Cant,P.Unit,Total) | Saldo(Cant,P.Unit,Total)
 	leftMargin, _, rightMargin, _ := pdf.GetMargins()
 	pageWidth, _ := pdf.GetPageSize()
 	available := pageWidth - leftMargin - rightMargin
 
-	// Ratios suman 100% — las celdas ocupan todo el ancho disponible.
-	ratios := []float64{6.78, 6.21, 4.52, 6.78, 6.21, 7.34, 7.34, 8.47, 7.34, 7.34, 8.47, 7.34, 7.34, 8.48}
-	cw := make([]float64, 14)
+	// Título del producto — truncado al ancho disponible (denominaciones largas)
+	pdf.SetFont("Arial", "B", 7)
+	titleTxt := fitCellText(pdf, fmt.Sprintf("Producto %d/%d: %s (%s)", index, total, denomination, elementCode), available)
+	pdf.CellFormat(0, 5, titleTxt, "", 1, "L", false, 0, "")
+
+	// 16 columnas — normalizadas al ancho disponible
+	ratios := []float64{6.2, 5.0, 4.4, 6.2, 4.4, 6.4, 3.6, 6.0, 5.8, 7.0, 6.0, 5.8, 7.0, 6.2, 5.6, 7.0}
+	totalRatio := 0.0
+	for _, r := range ratios {
+		totalRatio += r
+	}
+	cw := make([]float64, len(ratios))
 	for i, r := range ratios {
-		cw[i] = (r / 100.0) * available
+		cw[i] = (r / totalRatio) * available
 	}
 
 	maxY := g.maxContentY(pdf)
+	padX := 0.6 // padding horizontal de celda (el vertical ya es simétrico via cellGap)
 
-	// Header SUNAT
+	// Fila 1: colspanes
 	pdf.SetFont("Arial", "B", 5.5)
 	g.style.ApplyHeader(pdf)
 	hbf := g.style.HeaderBorderFlag()
-
-	// Fila 1: colspanes
 	pdf.CellFormat(cw[0], 3.5, "Fecha", hbf, 0, "C", true, 0, "")
 	pdf.CellFormat(cw[1]+cw[2]+cw[3], 3.5, "Comprobante", hbf, 0, "C", true, 0, "")
 	pdf.CellFormat(cw[4], 3.5, "T. Oper.", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[5]+cw[6]+cw[7], 3.5, "Entradas", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[8]+cw[9]+cw[10], 3.5, "Salidas", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[11]+cw[12]+cw[13], 3.5, "Saldo Final", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[5], 3.5, shared.ToLatin("Código"), hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[6], 3.5, "U.M.", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[7]+cw[8]+cw[9], 3.5, "Entradas", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[10]+cw[11]+cw[12], 3.5, "Salidas", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[13]+cw[14]+cw[15], 3.5, "Saldo Final", hbf, 0, "C", true, 0, "")
 	pdf.Ln(-1)
 
 	// Fila 2: sub-headers
@@ -433,15 +543,17 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 	pdf.CellFormat(cw[2], 3.5, "Serie", hbf, 0, "C", true, 0, "")
 	pdf.CellFormat(cw[3], 3.5, "Numero", hbf, 0, "C", true, 0, "")
 	pdf.CellFormat(cw[4], 3.5, "", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[5], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[6], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[7], 3.5, "Total", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[8], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[9], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[10], 3.5, "Total", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[11], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[12], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
-	pdf.CellFormat(cw[13], 3.5, "Total", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[5], 3.5, "", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[6], 3.5, "", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[7], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[8], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[9], 3.5, "Total", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[10], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[11], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[12], 3.5, "Total", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[13], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[14], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
+	pdf.CellFormat(cw[15], 3.5, "Total", hbf, 0, "C", true, 0, "")
 	pdf.Ln(-1)
 
 	pdf.SetFont("Arial", "", 5.5)
@@ -455,24 +567,24 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 
 		cx := x
 		rectFlag := g.style.DataRectFlag()
-		for j := 0; j < 14; j++ {
+		for j := 0; j < len(cw); j++ {
 			pdf.Rect(cx, y, cw[j], rh, rectFlag)
 			cx += cw[j]
 		}
 
 		pdf.SetFont("Arial", "B", 5.5)
-		pdf.SetXY(x+cw[0]+cw[1]+cw[2]+cw[3]+cellGap, y+cellGap)
-		pdf.CellFormat(cw[4]-cellGap*2, lineHt, "S. INICIAL", "", 0, "C", false, 0, "")
+		pdf.SetXY(x+cw[0]+cw[1]+cw[2]+cw[3]+padX, y+cellGap)
+		pdf.CellFormat(cw[4]+cw[5]+cw[6]-padX*2, lineHt, "S. INICIAL", "", 0, "C", false, 0, "")
 		pdf.SetFont("Arial", "", 5.5)
 
-		// Saldo inicial va en las columnas de Saldo Final (11,12,13)
-		siX := x + cw[0] + cw[1] + cw[2] + cw[3] + cw[4] + cw[5] + cw[6] + cw[7] + cw[8] + cw[9] + cw[10]
-		pdf.SetXY(siX+cellGap, y+cellGap)
-		pdf.CellFormat(cw[11]-cellGap*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Cantidad), "", 0, "R", false, 0, "")
-		pdf.SetXY(siX+cw[11]+cellGap, y+cellGap)
-		pdf.CellFormat(cw[12]-cellGap*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Precio), "", 0, "R", false, 0, "")
-		pdf.SetXY(siX+cw[11]+cw[12]+cellGap, y+cellGap)
-		pdf.CellFormat(cw[13]-cellGap*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Parcial), "", 0, "R", false, 0, "")
+		// Saldo inicial en las columnas de Saldo Final (13,14,15)
+		siX := x + cw[0] + cw[1] + cw[2] + cw[3] + cw[4] + cw[5] + cw[6] + cw[7] + cw[8] + cw[9] + cw[10] + cw[11] + cw[12]
+		pdf.SetXY(siX+padX, y+cellGap)
+		pdf.CellFormat(cw[13]-padX*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Cantidad), "", 0, "R", false, 0, "")
+		pdf.SetXY(siX+cw[13]+padX, y+cellGap)
+		pdf.CellFormat(cw[14]-padX*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Precio), "", 0, "R", false, 0, "")
+		pdf.SetXY(siX+cw[13]+cw[14]+padX, y+cellGap)
+		pdf.CellFormat(cw[15]-padX*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Parcial), "", 0, "R", false, 0, "")
 
 		pdf.SetXY(leftMargin, y+rh)
 	}
@@ -490,43 +602,44 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 		rh := rowHeight(1)
 		if pdf.GetY()+rh > maxY {
 			pdf.AddPage()
-			// Re-render headers
 			pdf.SetFont("Arial", "B", 7)
 			pdf.CellFormat(0, 5, fmt.Sprintf("Producto %d/%d: %s (cont.)", index, total, denomination), "", 1, "L", false, 0, "")
-			// Re-render column headers
 			pdf.SetFont("Arial", "B", 5.5)
 			g.style.ApplyHeader(pdf)
 			hbf := g.style.HeaderBorderFlag()
 			pdf.CellFormat(cw[0], 3.5, "Fecha", hbf, 0, "C", true, 0, "")
 			pdf.CellFormat(cw[1]+cw[2]+cw[3], 3.5, "Comprobante", hbf, 0, "C", true, 0, "")
 			pdf.CellFormat(cw[4], 3.5, "T. Oper.", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[5]+cw[6]+cw[7], 3.5, "Entradas", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[8]+cw[9]+cw[10], 3.5, "Salidas", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[11]+cw[12]+cw[13], 3.5, "Saldo Final", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[5], 3.5, shared.ToLatin("Código"), hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[6], 3.5, "U.M.", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[7]+cw[8]+cw[9], 3.5, "Entradas", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[10]+cw[11]+cw[12], 3.5, "Salidas", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[13]+cw[14]+cw[15], 3.5, "Saldo Final", hbf, 0, "C", true, 0, "")
 			pdf.Ln(-1)
+			g.style.ApplyHeader(pdf)
 			pdf.CellFormat(cw[0], 3.5, "", hbf, 0, "C", true, 0, "")
 			pdf.CellFormat(cw[1], 3.5, "Tipo", hbf, 0, "C", true, 0, "")
 			pdf.CellFormat(cw[2], 3.5, "Serie", hbf, 0, "C", true, 0, "")
 			pdf.CellFormat(cw[3], 3.5, "Numero", hbf, 0, "C", true, 0, "")
 			pdf.CellFormat(cw[4], 3.5, "", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[5], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[6], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[7], 3.5, "Total", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[8], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[9], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[10], 3.5, "Total", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[11], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[12], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
-			pdf.CellFormat(cw[13], 3.5, "Total", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[5], 3.5, "", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[6], 3.5, "", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[7], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[8], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[9], 3.5, "Total", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[10], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[11], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[12], 3.5, "Total", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[13], 3.5, "Cant.", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[14], 3.5, "P.Unit.", hbf, 0, "C", true, 0, "")
+			pdf.CellFormat(cw[15], 3.5, "Total", hbf, 0, "C", true, 0, "")
 			pdf.Ln(-1)
 			pdf.SetFont("Arial", "", 5.5)
 		}
 
 		isSalida := m.Asunto == "salida"
-		tipoOp := shared.ToLatin(m.TipoDocumento)
 
 		var entCant, entPrecio, entTotal, salCant, salPrecio, salTotal string
-
 		if !isSalida {
 			entCant = shared.FormatNumber(shared.GetFloatValue(m.CantidadIngreso))
 			entPrecio = shared.FormatNumber(shared.GetFloatValue(m.PrecioIngreso))
@@ -539,20 +652,21 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 		}
 
 		texts := []string{
-			shared.ToLatin(m.FechaKardex),
+			formatFechaSunat(m.FechaKardex),
 			shared.ToLatin(m.TipoDocumento),
 			shared.ToLatin(m.SerieDocumento),
 			shared.ToLatin(m.NumeroDocumento),
-			tipoOp,
+			tablaOperacionSunatCode(m.TipoOperacion),
+			elementCode,
+			unitLabel,
 			entCant, entPrecio, entTotal,
 			salCant, salPrecio, salTotal,
 			shared.FormatNumber(shared.GetFloatValue(m.CantidadFinal)),
 			shared.FormatNumber(shared.GetFloatValue(m.PrecioFinal)),
 			shared.FormatNumber(shared.GetFloatValue(m.CostoFinal)),
 		}
-		aligns := []string{"C", "C", "C", "C", "C", "R", "R", "R", "R", "R", "R", "R", "R", "R"}
+		aligns := []string{"C", "C", "C", "C", "C", "L", "C", "R", "R", "R", "R", "R", "R", "R", "R", "R"}
 
-		// Aplicar estilo según tipo (salida vs entrada)
 		if isSalida {
 			g.style.ApplySalida(pdf, idx)
 		} else {
@@ -566,8 +680,8 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 		for j, txt := range texts {
 			pdf.Rect(cx, y, cw[j], rh, rectFlag)
 			if txt != "" {
-				pdf.SetXY(cx+cellGap, y+cellGap)
-				pdf.CellFormat(cw[j]-cellGap*2, lineHt, txt, "", 0, aligns[j], false, 0, "")
+				pdf.SetXY(cx+padX, y+cellGap)
+				pdf.CellFormat(cw[j]-padX*2, lineHt, txt, "", 0, aligns[j], false, 0, "")
 			}
 			cx += cw[j]
 		}
@@ -603,6 +717,10 @@ func (g *Generator) generateSingleFile(insumos []KardexInsumo, filenameBase, fol
 	pdf.Ln(4)
 	// Cabecera de columnas UNA VEZ al inicio de la sección
 	showSerie, showLotes, showEstado := kardexSectionFlags(insumos)
+	if !g.detallado {
+		// Columnas de serie/lote SOLO en modo Detallado; ESTADO queda independiente
+		showSerie, showLotes = false, false
+	}
 	seguimientoColWidths := g.kardexColWidths(pdf, showSerie, showLotes, showEstado)
 	g.renderKardexHeaderRow1(pdf, seguimientoColWidths, showSerie, showLotes, showEstado)
 	pdf.Ln(-1)
@@ -662,6 +780,10 @@ func (g *Generator) generateBatchPDF(insumos []KardexInsumo, filenameBase, folde
 	// Cabecera de columnas UNA VEZ al inicio de la sección de seguimiento
 	pdf.Ln(4)
 	showSerie, showLotes, showEstado := kardexSectionFlags(insumos)
+	if !g.detallado {
+		// Columnas de serie/lote SOLO en modo Detallado; ESTADO queda independiente
+		showSerie, showLotes = false, false
+	}
 	seguimientoColWidths := g.kardexColWidths(pdf, showSerie, showLotes, showEstado)
 	g.renderKardexHeaderRow1(pdf, seguimientoColWidths, showSerie, showLotes, showEstado)
 	pdf.Ln(-1)
@@ -863,6 +985,9 @@ func (g *Generator) generateBatchOnlyPDF(batch []KardexInsumo, startIndex, total
 	pdf := g.createNewPDF()
 
 	showSerie, showLotes, showEstado := kardexSectionFlags(batch)
+	if !g.detallado {
+		showSerie, showLotes = false, false
+	}
 	for i := range batch {
 		g.addInsumoPage(pdf, &batch[i], startIndex+i+1, totalInsumos, showSerie, showLotes, showEstado)
 	}
