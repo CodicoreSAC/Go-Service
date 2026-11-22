@@ -24,7 +24,7 @@ type KardexMovimiento struct {
 	IDEmpresa       shared.FlexibleString `json:"idempresa"`
 	IDInsumo        shared.FlexibleString `json:"idinsumo"`
 	IDDetalleInsumo shared.FlexibleString `json:"iddetalle_insumo"`
-	Codigo          string                `json:"codigo"`
+	Codigo          shared.FlexibleString `json:"codigo"` // source document id: number since kardex_general.codigo became INT, string in older payloads
 	Fuente          string                `json:"fuente"`
 	Asunto          string                `json:"asunto"` // "salida" | "compra" | "proforma"
 	SerieDocumento  string                `json:"serie_documento"`

@@ -385,7 +385,15 @@ func GenerateAll(
 
 		switch spec.ReportType {
 		case "completo":
-			filename, err = gen.Generate(insumos, filenameSuffix, outputFolder, processKey, trk)
+			// Generate frees each insumo's movements as it goes (memory); with other
+			// formats in the same pass it gets a shallow copy so the 13.1 report still
+			// sees the movements (the copy's headers are cleared, not the original's).
+			src := insumos
+			if totalFormats > 1 {
+				src = make([]KardexInsumo, len(insumos))
+				copy(src, insumos)
+			}
+			filename, err = gen.Generate(src, filenameSuffix, outputFolder, processKey, trk)
 		case "resumen_saldos":
 			filename, err = gen.GenerateSummary(insumos, filenameSuffix, outputFolder, processKey, trk)
 		case "sunat_13_1":
@@ -450,6 +458,71 @@ func tablaOperacionSunatCode(tipoOperacion string) string {
 	return "99" // Otros (especificar)
 }
 
+// tabla12Short holds the short Table 12 names used in the "Tipo Op." column.
+// Keep in sync with server/apps/fe-inventory/src/kardex/services/kardex-operation.ts.
+var tabla12Short = map[string]string{
+	"01": "VENTA",
+	"02": "COMPRA",
+	"03": "CONSIG. RECIB.",
+	"04": "CONSIG. ENTREG.",
+	"05": "DEV. RECIBIDA",
+	"06": "DEV. ENTREGADA",
+	"07": "PROMOCION",
+	"08": "PREMIO",
+	"09": "DONACION",
+	"10": "SAL. PRODUCCION",
+	"11": "TRANSFERENCIA",
+	"12": "RETIRO",
+	"13": "MERMAS",
+	"14": "DESMEDROS",
+	"15": "DESTRUCCION",
+	"16": "SALDO INICIAL",
+	"99": "OTROS",
+}
+
+// sunatOperationCode derives the SUNAT Table 12 operation code of a movement.
+// The stored tipo_operacion is unreliable (often empty, or a catalog-51 code like
+// "0101"), so the document/direction decide first and tipo_operacion is only
+// honored when it is a Table 12 code consistent with the movement direction.
+func sunatOperationCode(m KardexMovimiento) string {
+	isSalida := m.Asunto == "salida"
+	switch {
+	case m.TipoDocumento == "07": // credit note: return received (sale) / delivered (purchase)
+		if isSalida {
+			return "05"
+		}
+		return "06"
+	case m.Fuente == "traslado" || m.TipoDocumento == "TRA":
+		return "11"
+	case m.TipoDocumento == "INV":
+		return "16"
+	}
+	op := strings.TrimSpace(m.TipoOperacion)
+	if c, ok := tablaOperacionSunat[op]; ok {
+		op = c
+	}
+	if _, ok := tabla12Short[op]; ok && op != "99" {
+		if (op == "01" && !isSalida) || (op == "02" && isSalida) {
+			op = "" // inconsistent with the direction → derive below
+		} else {
+			return op
+		}
+	}
+	switch m.Asunto {
+	case "salida":
+		return "01"
+	case "compra":
+		return "02"
+	}
+	return "99"
+}
+
+// operationLabel is the "Tipo Op." cell of the completo report, e.g. "02-COMPRA".
+func operationLabel(m KardexMovimiento) string {
+	code := sunatOperationCode(m)
+	return code + "-" + tabla12Short[code]
+}
+
 // formatFechaSunat convierte 'YYYY-MM-DD' a 'DD/MM/YYYY' (diseño oficial 13.1)
 func formatFechaSunat(fecha string) string {
 	if len(fecha) == 10 && fecha[4] == '-' && fecha[7] == '-' {
@@ -495,7 +568,7 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 
 	// Código del elemento: barcode del insumo o el código del primer movimiento
 	elementCode := barcode
-	if (elementCode == "" || elementCode == "S/C") && len(insumo.Kardex.Movimientos) > 0 {
+	if (elementCode == "" || elementCode == "S/C") && len(insumo.Kardex.Movimientos) > 0 && insumo.Kardex.Movimientos[0].CodigoInsumo != "" {
 		elementCode = shared.ToLatin(insumo.Kardex.Movimientos[0].CodigoInsumo)
 	}
 
@@ -560,33 +633,8 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 
 	// Saldo inicial
 	if insumo.Kardex.Initial != nil {
-		g.style.ApplySaldoInit(pdf)
-		x := leftMargin
-		y := pdf.GetY()
-		rh := rowHeight(1)
-
-		cx := x
-		rectFlag := g.style.DataRectFlag()
-		for j := 0; j < len(cw); j++ {
-			pdf.Rect(cx, y, cw[j], rh, rectFlag)
-			cx += cw[j]
-		}
-
-		pdf.SetFont("Arial", "B", 5.5)
-		pdf.SetXY(x+cw[0]+cw[1]+cw[2]+cw[3]+padX, y+cellGap)
-		pdf.CellFormat(cw[4]+cw[5]+cw[6]-padX*2, lineHt, "S. INICIAL", "", 0, "C", false, 0, "")
-		pdf.SetFont("Arial", "", 5.5)
-
-		// Saldo inicial en las columnas de Saldo Final (13,14,15)
-		siX := x + cw[0] + cw[1] + cw[2] + cw[3] + cw[4] + cw[5] + cw[6] + cw[7] + cw[8] + cw[9] + cw[10] + cw[11] + cw[12]
-		pdf.SetXY(siX+padX, y+cellGap)
-		pdf.CellFormat(cw[13]-padX*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Cantidad), "", 0, "R", false, 0, "")
-		pdf.SetXY(siX+cw[13]+padX, y+cellGap)
-		pdf.CellFormat(cw[14]-padX*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Precio), "", 0, "R", false, 0, "")
-		pdf.SetXY(siX+cw[13]+cw[14]+padX, y+cellGap)
-		pdf.CellFormat(cw[15]-padX*2, lineHt, shared.FormatNumber(insumo.Kardex.Initial.Parcial), "", 0, "R", false, 0, "")
-
-		pdf.SetXY(leftMargin, y+rh)
+		ini := insumo.Kardex.Initial
+		g.renderSunat13BalanceRow(pdf, cw, leftMargin, padX, "S. INICIAL", ini.Cantidad, ini.Precio, ini.Parcial)
 	}
 
 	// Filtrar proformas
@@ -656,7 +704,7 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 			shared.ToLatin(m.TipoDocumento),
 			shared.ToLatin(m.SerieDocumento),
 			shared.ToLatin(m.NumeroDocumento),
-			tablaOperacionSunatCode(m.TipoOperacion),
+			sunatOperationCode(m),
 			elementCode,
 			unitLabel,
 			entCant, entPrecio, entTotal,
@@ -688,7 +736,68 @@ func (g *Generator) addSUNAT13InsumoTable(pdf *gofpdf.Fpdf, insumo *KardexInsumo
 		pdf.SetXY(leftMargin, y+rh)
 	}
 
+	// Saldo final SIEMPRE (igual al inicial cuando no hay movimientos en la vista 13.1)
+	finCant, finPrecio, finParcial := 0.0, 0.0, 0.0
+	switch {
+	case len(validMovements) == 0 && insumo.Kardex.Initial != nil:
+		ini := insumo.Kardex.Initial
+		finCant, finPrecio, finParcial = ini.Cantidad, ini.Precio, ini.Parcial
+	case len(validMovements) > 0 && insumo.Kardex.Finish != nil:
+		fin := insumo.Kardex.Finish
+		finCant, finPrecio, finParcial = fin.Cantidad, fin.Precio, fin.Parcial
+	case len(validMovements) > 0:
+		last := validMovements[len(validMovements)-1]
+		finCant = shared.GetFloatValue(last.CantidadFinal)
+		finPrecio = shared.GetFloatValue(last.PrecioFinal)
+		finParcial = shared.GetFloatValue(last.CostoFinal)
+	}
+	if pdf.GetY()+rowHeight(1) > maxY {
+		pdf.AddPage()
+	}
+	g.renderSunat13BalanceRow(pdf, cw, leftMargin, padX, "S. FINAL", finCant, finPrecio, finParcial)
+
+	if len(validMovements) == 0 {
+		pdf.SetFont("Arial", "I", 5.5)
+		pdf.SetTextColor(0, 0, 0)
+		pdf.CellFormat(0, 4, shared.ToLatin("Sin comprobantes SUNAT en el período"), "", 1, "L", false, 0, "")
+		pdf.SetFont("Arial", "", 5.5)
+	}
+
 	pdf.Ln(5)
+}
+
+// renderSunat13BalanceRow draws a S. INICIAL / S. FINAL row of the 13.1 table:
+// the label spans T.Oper+Código+U.M. and the balance goes in the Saldo Final columns.
+func (g *Generator) renderSunat13BalanceRow(pdf *gofpdf.Fpdf, cw []float64, leftMargin, padX float64, label string, cant, precio, parcial float64) {
+	g.style.ApplySaldoInit(pdf)
+	x := leftMargin
+	y := pdf.GetY()
+	rh := rowHeight(1)
+
+	cx := x
+	rectFlag := g.style.DataRectFlag()
+	for j := 0; j < len(cw); j++ {
+		pdf.Rect(cx, y, cw[j], rh, rectFlag)
+		cx += cw[j]
+	}
+
+	pdf.SetFont("Arial", "B", 5.5)
+	pdf.SetXY(x+cw[0]+cw[1]+cw[2]+cw[3]+padX, y+cellGap)
+	pdf.CellFormat(cw[4]+cw[5]+cw[6]-padX*2, lineHt, label, "", 0, "C", false, 0, "")
+	pdf.SetFont("Arial", "", 5.5)
+
+	siX := x
+	for j := 0; j < 13; j++ {
+		siX += cw[j]
+	}
+	pdf.SetXY(siX+padX, y+cellGap)
+	pdf.CellFormat(cw[13]-padX*2, lineHt, shared.FormatNumber(cant), "", 0, "R", false, 0, "")
+	pdf.SetXY(siX+cw[13]+padX, y+cellGap)
+	pdf.CellFormat(cw[14]-padX*2, lineHt, shared.FormatNumber(precio), "", 0, "R", false, 0, "")
+	pdf.SetXY(siX+cw[13]+cw[14]+padX, y+cellGap)
+	pdf.CellFormat(cw[15]-padX*2, lineHt, shared.FormatNumber(parcial), "", 0, "R", false, 0, "")
+
+	pdf.SetXY(leftMargin, y+rh)
 }
 
 // =============================================================================
@@ -708,10 +817,6 @@ func (g *Generator) generateSingleFile(insumos []KardexInsumo, filenameBase, fol
 	g.addCoverPage(pdf)
 	// 2. Tabla resumen por producto
 	g.addProductSummaryPage(pdf, insumos)
-	// 3. Totales globales (TOTAL GENERAL + RESUMEN INVENTARIO + ANALISIS DE COSTOS)
-	trk.Update(processKey, 13, "in-progress", "Generando totales globales...")
-	g.AddGlobalTotalsSection(pdf, globalTotals)
-
 	// ─── SECCIÓN SEGUIMIENTO ───
 	// Margin superior antes de las cabeceras
 	pdf.Ln(4)
@@ -738,9 +843,9 @@ func (g *Generator) generateSingleFile(insumos []KardexInsumo, filenameBase, fol
 		insumos[i].Kardex.Movimientos = nil
 	}
 
-	// Totales globales al FINAL del seguimiento (resumen ejecutivo final)
-	pdf.AddPage()
-	g.AddGlobalTotalsSection(pdf, globalTotals)
+	// Totales globales UNA vez, al FINAL del seguimiento (resumen ejecutivo final);
+	// solo saltan de página si no caben en la actual
+	g.addFinalGlobalTotals(pdf, globalTotals)
 
 	filename := filenameBase + ".pdf"
 	outputPath := filepath.Join(folder, filename)
@@ -772,10 +877,6 @@ func (g *Generator) generateBatchPDF(insumos []KardexInsumo, filenameBase, folde
 	g.addCoverPage(pdf)
 	g.addProductSummaryPage(pdf, insumos)
 	shared.TriggerGC()
-
-	// Sección de totales globales — después del resumen, antes de los movimientos
-	trk.Update(processKey, 13, "in-progress", "Generando totales globales...")
-	g.AddGlobalTotalsSection(pdf, globalTotals)
 
 	// Cabecera de columnas UNA VEZ al inicio de la sección de seguimiento
 	pdf.Ln(4)
@@ -815,9 +916,9 @@ func (g *Generator) generateBatchPDF(insumos []KardexInsumo, filenameBase, folde
 		}
 	}
 
-	// Totales globales al FINAL del seguimiento (resumen ejecutivo final)
-	pdf.AddPage()
-	g.AddGlobalTotalsSection(pdf, globalTotals)
+	// Totales globales UNA vez, al FINAL del seguimiento (resumen ejecutivo final);
+	// solo saltan de página si no caben en la actual
+	g.addFinalGlobalTotals(pdf, globalTotals)
 
 	// Guardar
 	trk.Update(processKey, 95, "in-progress", "Guardando PDF...")

@@ -180,6 +180,28 @@ func (g *Generator) AddGlobalTotalsSection(pdf *gofpdf.Fpdf, gt GlobalTotals) {
 	colorBlack.text(pdf)
 }
 
+// globalTotalsHeight measures the rendered height of AddGlobalTotalsSection on a
+// scratch PDF with the same page setup (the block has a fixed layout).
+func (g *Generator) globalTotalsHeight(gt GlobalTotals) float64 {
+	scratch := g.createNewPDF()
+	scratch.AddPage()
+	y0 := scratch.GetY()
+	g.AddGlobalTotalsSection(scratch, gt)
+	return scratch.GetY() - y0
+}
+
+// addFinalGlobalTotals prints the global totals once at the end of the report,
+// on the current page when they fit, otherwise on a new page.
+func (g *Generator) addFinalGlobalTotals(pdf *gofpdf.Fpdf, gt GlobalTotals) {
+	const gap = 4.0
+	if pdf.GetY()+gap+g.globalTotalsHeight(gt) > g.maxContentY(pdf) {
+		pdf.AddPage()
+	} else {
+		pdf.Ln(gap)
+	}
+	g.AddGlobalTotalsSection(pdf, gt)
+}
+
 // =============================================================================
 // HELPERS
 // =============================================================================

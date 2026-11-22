@@ -322,7 +322,7 @@ func (g *Generator) buildKardexTable(pdf *gofpdf.Fpdf, title string, movements [
 		}
 
 		isSalida := m.Asunto == "salida"
-		tipoOp := shared.ToLatin(fmt.Sprintf("%s-VEN", m.TipoDocumento))
+		tipoOp := shared.ToLatin(operationLabel(m))
 
 		// Estado SUNAT no válido → etiqueta en rojo sobre fondo rojo claro
 		// (equivalente a table-danger en la web). No suman stock.
