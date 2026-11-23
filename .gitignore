@@ -1,6 +1,7 @@
 ./kardex-pdf-service
 *.json
 *.sh
+!scripts/release-prod.sh
 test-output/
 
 *.log
